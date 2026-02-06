@@ -1,0 +1,5 @@
+channelaccesstoken.txt
+*.txt  # 如果有其他 token 檔
+__pycache__/
+*.pyc
+*.py[cod]
