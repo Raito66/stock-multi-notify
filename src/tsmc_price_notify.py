@@ -66,9 +66,21 @@ def main():
     print(f"🕐 台灣時間：{now}")
     print(f"🕐 UTC 時間：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
     
+    # ✅ 发送启动通知
+    startup_msg = (
+        f"【台積電監控】\n"
+        f"程式已啟動\n"
+        f"時間：{now}\n"
+        f"動態區間設定：±{PERCENT_RANGE}%\n"
+        f"開始監控..."
+    )
+    send_line_push(startup_msg)
+    print("✅ 已發送啟動通知")
+    
     price = get_tsmc_price()
     if price is None:
         send_line_push(f"【台積電監控】\n{now}\n⚠️ 無法取得最新成交價")
+        print("⚠️ 無法取得股價")
         return
 
     # 動態區間計算
@@ -95,7 +107,7 @@ def main():
     )
 
     send_line_push(msg)
-    print("推播完成")
+    print("✅ 推播股價資訊完成")
 
 if __name__ == "__main__":
     main()
