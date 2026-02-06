@@ -2,7 +2,7 @@ name: TSMC Price Notify
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # 每 5 分鐘執行一次
+    - cron: "*/3 * * * *"   # 每 5 分鐘執行一次
   workflow_dispatch:        # 可手動執行（測試用）
 
 jobs:
