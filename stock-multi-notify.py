@@ -79,18 +79,29 @@ def write_log(msg):
 
 # ======================== 核心函式 ========================
 
-def get_latest_instant_price(dl, stock_id: str):
-    """取得單支股票盤中即時成交價"""
+def get_latest_instant_price(dl, stock_id: str, is_after_close: bool):
+    """取得單支股票盤中即時成交價（盤中用 TaiwanStockTick, 盤後用 TaiwanStockPrice）"""
     df = None
     try:
         today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-        df = dl.get_data(dataset="TaiwanStockPrice", data_id=stock_id, start_date=today)
-        if df is None or df.empty or 'deal_price' not in df.columns:
-            msg = f"{stock_id} 即時資料為空或缺少 deal_price 欄位, df={df}"
-            write_log(msg)
-            return None
-        latest = df.iloc[-1]
-        return {"price": float(latest["deal_price"]), "time": latest["datetime"]}
+        if is_after_close:
+            # 盤後用收盤價
+            df = dl.get_data(dataset="TaiwanStockPrice", data_id=stock_id, start_date=today)
+            if df is None or df.empty or 'close' not in df.columns:
+                msg = f"{stock_id} 盤後資料為空或缺少 close 欄位, df={df}"
+                write_log(msg)
+                return None
+            latest = df.iloc[-1]
+            return {"price": float(latest["close"]), "time": latest["date"]}
+        else:
+            # 盤中用即時成交價
+            df = dl.get_data(dataset="TaiwanStockTick", data_id=stock_id, start_date=today)
+            if df is None or df.empty or 'price' not in df.columns:
+                msg = f"{stock_id} 盤中即時資料為空或缺少 price 欄位, df={df}"
+                write_log(msg)
+                return None
+            latest = df.iloc[-1]
+            return {"price": float(latest["price"]), "time": latest["timestamp"]}
     except Exception as e:
         error_msg = f"{stock_id} 取得即時價失敗：{e}"
         write_log(error_msg)
@@ -132,14 +143,13 @@ def get_stock_data(dl, stock_id: str) -> Optional[Dict]:
     """取得單支股票資料，盤中即時價 + 盤後收盤價"""
     now = datetime.now(timezone(timedelta(hours=8)))
     today = now.strftime("%Y-%m-%d")
+    is_after_close = now.hour > 13 or (now.hour == 13 and now.minute >= 30)
 
-    instant = get_latest_instant_price(dl, stock_id)
+    instant = get_latest_instant_price(dl, stock_id, is_after_close)
     if not instant:
         return None
 
     yesterday_close = get_yesterday_close(dl, stock_id) or instant["price"]
-
-    is_after_close = now.hour > 13 or (now.hour == 13 and now.minute >= 30)
 
     result = {
         "stock_id": stock_id,
