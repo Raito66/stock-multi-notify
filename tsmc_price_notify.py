@@ -58,19 +58,28 @@ def send_line_push(message: str):
     except Exception as e:
         print(f"LINE 推播失敗：{e}")
 
+def write_log(msg):
+    with open("error.log", "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    # 也印出到 console 方便 debug
+    print(msg)
+
 # ======================== 核心函式 ========================
 
 def get_latest_instant_price(dl, stock_id: str):
     """取得單支股票盤中即時成交價"""
     try:
         df = dl.get_data(dataset="TaiwanStockInstant", data_id=stock_id)
-        if df.empty:
-            print(f"{stock_id} 即時資料為空")
+        # 檢查 df 是否為 DataFrame 並且有 'deal_price' 欄位
+        if df is None or df.empty or 'deal_price' not in df.columns:
+            msg = f"{stock_id} 即時資料為空或缺少 deal_price 欄位, df={df}"
+            write_log(msg)
             return None
         latest = df.iloc[-1]
         return {"price": float(latest["deal_price"]), "time": latest["datetime"]}
     except Exception as e:
-        print(f"{stock_id} 取得即時價失敗：{e}")
+        error_msg = f"{stock_id} 取得即時價失敗：{e}"
+        write_log(error_msg)
         return None
 
 def get_today_close(dl, stock_id: str, date_str: str) -> Optional[float]:
@@ -81,7 +90,8 @@ def get_today_close(dl, stock_id: str, date_str: str) -> Optional[float]:
             return float(df.iloc[0]["close"])
         return None
     except Exception as e:
-        print(f"{stock_id} 取得收盤價失敗：{e}")
+        error_msg = f"{stock_id} 取得收盤價失敗：{e}"
+        write_log(error_msg)
         return None
 
 def get_yesterday_close(dl, stock_id: str) -> Optional[float]:
@@ -93,7 +103,9 @@ def get_yesterday_close(dl, stock_id: str) -> Optional[float]:
         if not df.empty:
             return float(df.iloc[-1]["close"])
         return None
-    except:
+    except Exception as e:
+        error_msg = f"{stock_id} 取得昨收失敗：{e}"
+        write_log(error_msg)
         return None
 
 def get_stock_data(dl, stock_id: str) -> Optional[Dict]:
@@ -149,7 +161,8 @@ def load_history_from_sheets(service) -> List[Dict]:
                 })
         return history
     except Exception as e:
-        print(f"讀取 Sheets 失敗：{e}")
+        error_msg = f"讀取 Sheets 失敗：{e}"
+        write_log(error_msg)
         return []
 
 def save_to_sheets(service, stock_id, date, price, ma5, ma20, ma60, timestamp):
@@ -166,7 +179,8 @@ def save_to_sheets(service, stock_id, date, price, ma5, ma20, ma60, timestamp):
         print(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
         return True
     except Exception as e:
-        print(f"{stock_id} 寫入 Sheets 失敗：{e}")
+        error_msg = f"{stock_id} 寫入 Sheets 失敗：{e}"
+        write_log(error_msg)
         return False
 
 # ======================== 主程式 ========================
@@ -176,7 +190,7 @@ def main():
     now = datetime.now(tz)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    print(f"🕐 台灣時間：{now_str}")
+    write_log(f"🕐 台灣時間：{now_str}")
 
     service = get_sheets_service()
     dl = DataLoader()
@@ -185,7 +199,7 @@ def main():
     for stock_id in STOCK_LIST:
         stock = get_stock_data(dl, stock_id)
         if not stock:
-            print(f"{stock_id} 無法取得資料")
+            write_log(f"{stock_id} 無法取得資料")
             continue
 
         # 取得歷史收盤價
