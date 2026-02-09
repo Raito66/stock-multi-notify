@@ -11,6 +11,7 @@ from FinMind.data import DataLoader
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import time
 
 # ======================== 環境變數 ========================
 
@@ -83,59 +84,97 @@ def send_line_push(message: str):
         print(f"⚠️ LINE 推播錯誤：{e}")
 
 
-def get_tsmc_data(max_attempts=3, delay_seconds=5) -> Optional[Dict]:
+def get_tsmc_data(max_attempts=3, delay_seconds=10) -> Optional[Dict]:
     """
     使用 FinMind 取得台積電最新價格與昨收價
-    需要設定 FINMIND_TOKEN 環境變數
+    加強版：增加除錯資訊、更好的錯誤處理
     """
     dl = DataLoader()
-    dl.login_by_token(api_token=FINMIND_TOKEN)
+
+    # 務必確認 token 是否正確設定
+    try:
+        dl.login_by_token(api_token=FINMIND_TOKEN)
+        print("FinMind token 登入成功")
+    except Exception as e:
+        print(f"FinMind 登入失敗：{e}")
+        send_line_push(f"【台積電監控】\nFinMind 登入失敗：{str(e)}")
+        return None
+
+    taipei_tz = timezone(timedelta(hours=8))
+    now = datetime.now(taipei_tz)
+
+    # 取最近 10 天（通常足夠抓到昨天和今天）
+    end_date = now.strftime("%Y-%m-%d")
+    start_date = (now - timedelta(days=10)).strftime("%Y-%m-%d")
+
+    print(f"查詢區間：{start_date} 至 {end_date}")
 
     for attempt in range(max_attempts):
         try:
-            # 取得最近幾天的日成交資料（取最新一筆）
-            end_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-            start_date = (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=10)).strftime("%Y-%m-%d")
-
             df = dl.taiwan_stock_daily(
                 stock_id=TSMC_STOCK_ID,
                 start_date=start_date,
                 end_date=end_date
             )
 
+            print(f"取得資料筆數：{len(df) if not df.empty else 0}")
+
             if df.empty:
-                print(f"第 {attempt+1} 次：無資料")
+                print(f"第 {attempt+1} 次：資料框為空")
                 time.sleep(delay_seconds)
                 continue
 
-            # 取最新一筆
+            # 排序確保最新在最後
+            df = df.sort_values('date')
             latest = df.iloc[-1]
+
             current_price = float(latest['close'])
 
-            # 昨收價：如果有前一天就用前一天，沒有就用當天
+            # 嘗試取前一天收盤價
             if len(df) >= 2:
                 yesterday_close = float(df.iloc[-2]['close'])
             else:
-                yesterday_close = current_price  # 保底
+                yesterday_close = current_price
+                print("警告：只有一筆資料，昨收使用今日收盤代替")
 
-            # 取得台灣時間
-            taipei_tz = timezone(timedelta(hours=8))
-            today_dt = datetime.now(timezone.utc).astimezone(taipei_tz)
-            today_str = today_dt.strftime("%Y-%m-%d")
+            today_str = now.strftime("%Y-%m-%d")
 
-            print(f"FinMind 取得成功：現價 {current_price}，昨收 {yesterday_close}")
+            print(f"成功 - 日期：{latest['date']}，收盤價：{current_price}，昨收：{yesterday_close}")
 
             return {
                 "price": current_price,
                 "yesterday_close": yesterday_close,
-                "date": today_str
+                "date": today_str,
+                "raw_date": latest['date']   # 保留真正資料日期
             }
 
         except Exception as e:
-            print(f"FinMind 第 {attempt+1} 次失敗：{e}")
+            print(f"第 {attempt+1} 次失敗：{str(e)}")
+
+            # 最重要的除錯：印出真正的 API 回應內容
+            if hasattr(e, 'response') or 'response' in locals():
+                try:
+                    print("API 原始回應：")
+                    print(response)           # 如果有的話
+                except:
+                    pass
+
+            # 也嘗試直接用 get_data 看錯誤訊息
+            try:
+                raw_response = dl.get_data(
+                    dataset="TaiwanStockPrice",
+                    data_id=TSMC_STOCK_ID,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                print("直接 get_data 回傳：")
+                print(raw_response)
+            except Exception as e2:
+                print(f"直接 get_data 也失敗：{str(e2)}")
+
             time.sleep(delay_seconds)
 
-    print("FinMind 所有嘗試皆失敗")
+    print("所有嘗試都失敗，無法取得台積電資料")
     return None
 
 
