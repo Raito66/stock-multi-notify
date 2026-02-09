@@ -6,7 +6,7 @@ google-auth-httplib2==0.2.0 # Google API HTTP 支援
 google-api-python-client==2.116.0 # Google API 官方 Python 客戶端
 
 # FinMind（取代 yfinance）
-FinMind>=1.0.0             # 台灣股市資料 API，取得股票資訊
+FinMind>=1.2.0             # 台灣股市資料 API，取得股票資訊
 
 # 可選（如果有使用 pandas 或其他資料處理，建議加上）
 pandas>=2.0.0              # 資料處理與分析工具，表格運算
