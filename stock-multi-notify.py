@@ -281,7 +281,7 @@ def main():
                 f"20日均線：{ma20:.2f}" if ma20 is not None else "20日均線：無資料",
                 f"60日均線：{ma60:.2f}" if ma60 is not None else "60日均線：無資料",
                 f"今日收盤：{stock['close_price']:.2f} 元",
-                "※ 資料來源：FinMind（付費版）"
+                "※ 資料來源：FinMind"
             ]
             save_to_sheets(service, stock_id, stock_name, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
             send_line_push("\n".join(msg))
