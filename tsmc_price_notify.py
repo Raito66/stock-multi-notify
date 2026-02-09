@@ -60,23 +60,23 @@ def send_line_push(message: str):
 
 # ======================== ★ 核心修正：即時價 ========================
 
-def get_latest_instant_price(dl) -> Optional[Dict]:
-    """
-    盤中 / 盤後：即時成交價
-    使用 FinMind 即時資料 taiwan_stock_instant
-    """
+def get_latest_instant_price(dl, stock_id: str):
     try:
-        df = dl.taiwan_stock_instant(stock_id=TSMC_STOCK_ID)
+        df = dl.get_data(
+            dataset="TaiwanStockInstant",
+            data_id=stock_id
+        )
 
         if df.empty:
-            print("即時資料為空")
+            print(f"{stock_id} 即時資料為空")
             return None
 
         latest = df.iloc[-1]
+
         price = float(latest["deal_price"])
         time_str = latest["datetime"]
 
-        print(f"即時成交價：{price:.2f}（{time_str}）")
+        print(f"{stock_id} 即時成交：{price}（{time_str}）")
 
         return {
             "price": price,
@@ -84,8 +84,9 @@ def get_latest_instant_price(dl) -> Optional[Dict]:
         }
 
     except Exception as e:
-        print(f"取得即時價失敗：{e}")
+        print(f"{stock_id} 取得即時價失敗：{e}")
         return None
+
 
 
 def get_today_close(dl, date_str: str) -> Optional[float]:
