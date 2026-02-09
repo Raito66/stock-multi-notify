@@ -49,28 +49,36 @@ def get_sheets_service():
         print(f"⚠️ Google Sheets 連線失敗：{e}")
         return None
 
-def load_history_from_sheets(service):
+def load_history_from_sheets(service, stock_id=None):
     if not service:
         return []
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
-            range=f"{SHEET_NAME}!A2:F"
+            range=f"{SHEET_NAME}!A2:H"
         ).execute()
         values = result.get("values", [])
         history = []
         for row in values:
-            if len(row) >= 2:
+            if len(row) >= 4:
                 try:
-                    price = float(row[1]) if row[1] not in ('', None) else None
+                    price = float(row[3]) if row[3] not in ('', None) else None
                 except Exception:
                     price = None
-                if price is not None:
-                    history.append({
-                        "date": row[0],
-                        "price": price,
-                        "timestamp": row[5] if len(row) > 5 else row[0]
-                    })
+                ma5 = row[4] if len(row) > 4 else None
+                ma20 = row[5] if len(row) > 5 else None
+                ma60 = row[6] if len(row) > 6 else None
+                history.append({
+                    "stock_id": row[0],
+                    "date": row[2],
+                    "price": price,
+                    "ma5": ma5,
+                    "ma20": ma20,
+                    "ma60": ma60,
+                    "timestamp": row[7] if len(row) > 7 else row[2]
+                })
+        if stock_id:
+            return [h for h in history if h["stock_id"] == stock_id]
         return history
     except Exception as e:
         write_log(f"讀取 Sheets 失敗：{e}")
@@ -79,26 +87,46 @@ def load_history_from_sheets(service):
 def save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp):
     if not service:
         return False
-    while True:
-        try:
-            values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
-            resp = service.spreadsheets().values().append(
-                spreadsheetId=GOOGLE_SHEET_ID,
-                range=f"{SHEET_NAME}!A2",
-                valueInputOption="USER_ENTERED",
-                body={"values": values}
-            ).execute()
-            write_log(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
-            return True
-        except Exception as e:
-            err_str = str(e)
-            if '429' in err_str or 'quota' in err_str.lower():
-                write_log(f"{stock_id} quota exceeded，sleep 60 秒後重試")
-                time.sleep(60)
-                continue
-            else:
-                write_log(f"{stock_id} 寫入 Sheets 失敗：{e}")
-                return False
+    try:
+        values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
+        service.spreadsheets().values().append(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=f"{SHEET_NAME}!A2",
+            valueInputOption="USER_ENTERED",
+            body={"values": values}
+        ).execute()
+        write_log(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
+        return True
+    except Exception as e:
+        write_log(f"{stock_id} 寫入 Sheets 失敗：{e}")
+        return False
+
+def update_row_in_sheets(service, stock_id, date, stock_name, price, ma5, ma20, ma60, timestamp):
+    # 先讀取所有資料，找到要更新的row index
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=f"{SHEET_NAME}!A2:H"
+        ).execute()
+        values = result.get("values", [])
+        for idx, row in enumerate(values):
+            if len(row) > 2 and row[0] == stock_id and row[2] == date:
+                # 找到要更新的row
+                update_range = f"{SHEET_NAME}!A{idx+2}:H{idx+2}"
+                update_values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
+                service.spreadsheets().values().update(
+                    spreadsheetId=GOOGLE_SHEET_ID,
+                    range=update_range,
+                    valueInputOption="USER_ENTERED",
+                    body={"values": update_values}
+                ).execute()
+                write_log(f"{stock_id} 覆蓋 Sheets 成功：{date} - {price}")
+                return True
+        # 沒找到就append
+        return save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp)
+    except Exception as e:
+        write_log(f"{stock_id} 更新 Sheets 失敗：{e}")
+        return False
 
 def calculate_ma(prices, window):
     return pd.Series(prices).rolling(window).mean().iloc[-1] if len(prices) >= window else None
@@ -171,16 +199,11 @@ def trim_history_to_limit(service, stock_id, limit=400):
 def fill_missing_history(service, dl, batch_days=10, sleep_sec=60):
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
-    today_str = now.strftime("%Y-%m-%d")
     for stock_id in STOCK_LIST:
         stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
-        history = load_history_from_sheets(service)
-        # 判斷現有資料筆數，若已達 400 筆則跳過
-        stock_rows = [row for row in history if (row.get("stock_id", stock_id) == stock_id) or (len(row) > 0 and row[0] == stock_id)]
-        if len(stock_rows) >= 400:
-            write_log(f"{stock_id} 已有 {len(stock_rows)} 筆資料，無需補齊，跳過")
-            continue
-        existing_dates = set([row["date"] for row in history if row.get("stock_id", stock_id) == stock_id])
+        history = load_history_from_sheets(service, stock_id)
+        # 以日期為key，方便查找
+        history_map = {h["date"]: h for h in history}
         start_date = (now - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
         df = dl.taiwan_stock_daily(stock_id, start_date=start_date, end_date=end_date)
@@ -194,27 +217,24 @@ def fill_missing_history(service, dl, batch_days=10, sleep_sec=60):
             batch_end = min(batch_start + batch_days, total)
             for i in range(batch_start, batch_end):
                 date = dates[i]
-                # 若日期已存在且不是今天，則跳過
-                if date in existing_dates and date != today_str:
-                    continue
-                # 若是今天且已存在，先刪除該行再寫入（覆蓋）
-                if date == today_str and date in existing_dates:
-                    # 讀取所有資料，移除今天該股票的舊資料
-                    result = service.spreadsheets().values().get(
-                        spreadsheetId=GOOGLE_SHEET_ID,
-                        range=f"{SHEET_NAME}!A2:H"
-                    ).execute()
-                    values = result.get("values", [])
-                    new_values = [row for row in values if not (len(row) > 0 and row[0] == stock_id and row[2] == date)]
-                    safe_clear(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2:H")
-                    if new_values:
-                        safe_update(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2", new_values)
+                price = closes[i]
                 ma5 = calculate_ma(closes[:i+1], 5)
                 ma20 = calculate_ma(closes[:i+1], 20)
                 ma60 = calculate_ma(closes[:i+1], 60)
-                price = closes[i]
                 timestamp = f"{date} 00:00:00"
-                save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp)
+                # 判斷該日期資料是否完整
+                exist = history_map.get(date)
+                if exist:
+                    # 檢查均線欄位是否都齊全且非空
+                    if all([
+                        exist.get("price") not in (None, ''),
+                        exist.get("ma5") not in (None, '', '無資料'),
+                        exist.get("ma20") not in (None, '', '無資料'),
+                        exist.get("ma60") not in (None, '', '無資料')
+                    ]):
+                        continue  # 完整就跳過
+                # 不完整或不存在就覆蓋
+                update_row_in_sheets(service, stock_id, date, stock_name, price, ma5, ma20, ma60, timestamp)
                 write_log(f"{stock_id} 補齊歷史收盤價：{date} - {price}")
             write_log(f"{stock_id} batch {batch_start}-{batch_end} 補齊完成，sleep {sleep_sec} 秒")
             time.sleep(sleep_sec)
