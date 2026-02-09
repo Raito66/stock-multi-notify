@@ -73,31 +73,32 @@ def send_line_push(message: str):
 
 
 def get_latest_minute_price(dl) -> Optional[Dict]:
+    """
+    取得台積電今日最新的分鐘級成交價（最接近即時）
+    使用 FinMind 官方 get_data 方式
+    """
     try:
         today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
 
-        print(f"正在查詢分鐘資料：{today}，股票：{TSMC_STOCK_ID}")
+        print(f"正在查詢分鐘資料：日期={today}，股票={TSMC_STOCK_ID}")
 
-        # 先用 get_data 取得原始 response（不轉 DataFrame）
-        response = dl.get_data(
+        df = dl.get_data(
             dataset="TaiwanStockMinute",
             data_id=TSMC_STOCK_ID,
             start_date=today,
-            end_date=today,
-            raw=True  # 關鍵：加 raw=True 取得原始 dict 而非自動轉 DataFrame
+            end_date=today
         )
 
-        print("FinMind 原始回傳（raw response）：")
-        print(response)  # <--- 這行最重要！會印出完整 response
-
-        # 如果是 dict 且有 'data'，再轉 DataFrame
-        if isinstance(response, dict) and 'data' in response:
-            df = pd.DataFrame(response['data'])
-        else:
-            df = response  # 可能是空的 DataFrame 或其他格式
+        print(f"取得資料筆數：{len(df) if not df.empty else 0}")
 
         if df.empty:
-            print("分鐘資料為空（可能尚未開盤、盤後未更新或 API 限制）")
+            print("分鐘資料為空（可能尚未開盤、盤後未更新、或 API 限制）")
+            return None
+
+        # 確保欄位存在
+        if 'date' not in df.columns or 'close' not in df.columns:
+            print("資料欄位異常，缺少 'date' 或 'close'")
+            print("實際欄位：", list(df.columns))
             return None
 
         df = df.sort_values('date')
@@ -115,6 +116,9 @@ def get_latest_minute_price(dl) -> Optional[Dict]:
 
     except Exception as e:
         print(f"取得分鐘價失敗：{str(e)}")
+        # 如果是 KeyError 'data'，表示回傳結構異常
+        if 'response' in locals():
+            print("原始回應內容（如果有）：", response)
         return None
 
 
