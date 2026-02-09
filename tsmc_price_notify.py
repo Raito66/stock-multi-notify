@@ -1,4 +1,4 @@
-# 台積電價格監控 - 使用 Google Sheets 永久儲存
+# 多股價格監控 - Google Sheets 永久儲存
 # 盤中：即時成交價
 # 盤後：即時成交價 + 正式收盤價寫入 Sheets
 
@@ -26,7 +26,7 @@ if not all([CHANNEL_ACCESS_TOKEN, USER_ID, GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHE
 
 # ======================== 參數設定 ========================
 
-TSMC_STOCK_ID = "2330"
+STOCK_LIST = ["2330"]  # 可以放多支股票
 HISTORY_DAYS = 365
 SHEET_NAME = "Sheet1"
 
@@ -47,91 +47,70 @@ def get_sheets_service():
         print(f"⚠️ Google Sheets 連線失敗：{e}")
         return None
 
-
 def send_line_push(message: str):
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
     }
-    payload = {"to": USER_ID, "messages": [{"type": "text", "text": message}]}
-    requests.post(url, headers=headers, json=payload, timeout=10)
+    try:
+        requests.post(url, headers=headers, json={"to": USER_ID, "messages":[{"type":"text","text":message}]}, timeout=10)
+    except Exception as e:
+        print(f"LINE 推播失敗：{e}")
 
-
-# ======================== ★ 核心修正：即時價 ========================
+# ======================== 核心函式 ========================
 
 def get_latest_instant_price(dl, stock_id: str):
+    """取得單支股票盤中即時成交價"""
     try:
-        df = dl.get_data(
-            dataset="TaiwanStockInstant",
-            data_id=stock_id
-        )
-
+        df = dl.get_data(dataset="TaiwanStockInstant", data_id=stock_id)
         if df.empty:
             print(f"{stock_id} 即時資料為空")
             return None
-
         latest = df.iloc[-1]
-
-        price = float(latest["deal_price"])
-        time_str = latest["datetime"]
-
-        print(f"{stock_id} 即時成交：{price}（{time_str}）")
-
-        return {
-            "price": price,
-            "time": time_str
-        }
-
+        return {"price": float(latest["deal_price"]), "time": latest["datetime"]}
     except Exception as e:
         print(f"{stock_id} 取得即時價失敗：{e}")
         return None
 
-
-
-def get_today_close(dl, date_str: str) -> Optional[float]:
+def get_today_close(dl, stock_id: str, date_str: str) -> Optional[float]:
     """盤後正式收盤價（存 Sheets 用）"""
     try:
-        df = dl.taiwan_stock_daily(
-            stock_id=TSMC_STOCK_ID,
-            start_date=date_str,
-            end_date=date_str
-        )
+        df = dl.taiwan_stock_daily(stock_id, start_date=date_str, end_date=date_str)
         if not df.empty:
             return float(df.iloc[0]["close"])
         return None
     except Exception as e:
-        print(f"取得收盤價失敗：{e}")
+        print(f"{stock_id} 取得收盤價失敗：{e}")
         return None
 
-
-def get_yesterday_close(dl) -> Optional[float]:
+def get_yesterday_close(dl, stock_id: str) -> Optional[float]:
+    """前一交易日收盤價"""
     try:
         end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
-        df = dl.taiwan_stock_daily(TSMC_STOCK_ID, start, end)
+        df = dl.taiwan_stock_daily(stock_id, start, end)
         if not df.empty:
             return float(df.iloc[-1]["close"])
         return None
     except:
         return None
 
-
-# ======================== 主邏輯 ========================
-
-def get_tsmc_data(dl) -> Optional[Dict]:
+def get_stock_data(dl, stock_id: str) -> Optional[Dict]:
+    """取得單支股票資料，盤中即時價 + 盤後收盤價"""
     now = datetime.now(timezone(timedelta(hours=8)))
     today = now.strftime("%Y-%m-%d")
 
-    instant = get_latest_instant_price(dl, TSMC_STOCK_ID)
+    instant = get_latest_instant_price(dl, stock_id)
     if not instant:
         return None
 
-    yesterday_close = get_yesterday_close(dl) or instant["price"]
+    yesterday_close = get_yesterday_close(dl, stock_id) or instant["price"]
 
     is_after_close = now.hour > 13 or (now.hour == 13 and now.minute >= 30)
 
     result = {
+        "stock_id": stock_id,
         "latest_price": instant["price"],
         "latest_time": instant["time"],
         "yesterday_close": yesterday_close,
@@ -140,20 +119,55 @@ def get_tsmc_data(dl) -> Optional[Dict]:
     }
 
     if is_after_close:
-        close_price = get_today_close(dl, today)
+        close_price = get_today_close(dl, stock_id, today)
         if close_price:
             result["close_price"] = close_price
 
     return result
 
+def calculate_ma(prices, window):
+    return pd.Series(prices).rolling(window).mean().iloc[-1] if len(prices) >= window else None
 
-# ======================== Sheets / MA（你原本的邏輯，未動） ========================
+# ======================== Google Sheets ========================
 
-def calculate_ma(history, days):
-    if len(history) < days:
-        return None
-    return sum(h["price"] for h in history[-days:]) / days
+def load_history_from_sheets(service) -> List[Dict]:
+    if not service:
+        return []
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=f"{SHEET_NAME}!A2:F"
+        ).execute()
+        values = result.get("values", [])
+        history = []
+        for row in values:
+            if len(row) >= 2:
+                history.append({
+                    "date": row[0],
+                    "price": float(row[1]),
+                    "timestamp": row[5] if len(row) > 5 else row[0]
+                })
+        return history
+    except Exception as e:
+        print(f"讀取 Sheets 失敗：{e}")
+        return []
 
+def save_to_sheets(service, stock_id, date, price, ma5, ma20, ma60, timestamp):
+    if not service:
+        return False
+    try:
+        values = [[stock_id, date, price, ma5, ma20, ma60, timestamp]]
+        service.spreadsheets().values().append(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=f"{SHEET_NAME}!A2",
+            valueInputOption="USER_ENTERED",
+            body={"values": values}
+        ).execute()
+        print(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
+        return True
+    except Exception as e:
+        print(f"{stock_id} 寫入 Sheets 失敗：{e}")
+        return False
 
 # ======================== 主程式 ========================
 
@@ -161,7 +175,6 @@ def main():
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    today = now.strftime("%Y-%m-%d")
 
     print(f"🕐 台灣時間：{now_str}")
 
@@ -169,36 +182,44 @@ def main():
     dl = DataLoader()
     dl.login_by_token(FINMIND_TOKEN)
 
-    stock = get_tsmc_data(dl)
-    if not stock:
-        send_line_push(f"【台積電監控】\n{now_str}\n⚠️ 無法取得股價")
-        return
+    for stock_id in STOCK_LIST:
+        stock = get_stock_data(dl, stock_id)
+        if not stock:
+            print(f"{stock_id} 無法取得資料")
+            continue
 
-    latest = stock["latest_price"]
-    yesterday = stock["yesterday_close"]
-    change = latest - yesterday
-    pct = change / yesterday * 100 if yesterday else 0
+        # 取得歷史收盤價
+        df = dl.taiwan_stock_daily(stock_id, start_date=(now - timedelta(days=61)).strftime("%Y-%m-%d"), end_date=now.strftime("%Y-%m-%d"))
+        closes = df["close"].tolist() if not df.empty else []
 
-    title = "【台積電盤中快訊】" if not stock["is_after_close"] else "【台積電價格監控】"
+        ma5 = calculate_ma(closes, 5)
+        ma20 = calculate_ma(closes, 20)
+        ma60 = calculate_ma(closes, 60)
 
-    msg = [
-        title,
-        f"時間：{now_str}",
-        "━━━━━━━━━━━━━━",
-        f"最新成交：{stock['latest_time']}",
-        f"現價：{latest:.2f} 元",
-        f"昨收：{yesterday:.2f} 元",
-        f"漲跌：{change:+.2f}（{pct:+.2f}%）"
-    ]
+        latest = stock["latest_price"]
+        yesterday = stock["yesterday_close"]
+        change = latest - yesterday
+        pct = change / yesterday * 100 if yesterday else 0
 
-    if stock["is_after_close"] and "close_price" in stock:
-        msg.append(f"今日收盤：{stock['close_price']:.2f} 元")
+        msg = [
+            f"【{stock_id} 價格監控】",
+            f"時間：{now_str}",
+            "━━━━━━━━━━━━━━",
+            f"現價：{latest:.2f} 元",
+            f"昨收：{yesterday:.2f} 元",
+            f"漲跌：{change:+.2f}（{pct:+.2f}%）",
+            f"5日均線：{ma5:.2f}" if ma5 is not None else "5日均線：無資料",
+            f"20日均線：{ma20:.2f}" if ma20 is not None else "20日均線：無資料",
+            f"60日均線：{ma60:.2f}" if ma60 is not None else "60日均線：無資料"
+        ]
 
-    msg.append("※ 資料來源：FinMind（付費版）")
-    send_line_push("\n".join(msg))
+        if stock["is_after_close"] and "close_price" in stock:
+            msg.append(f"今日收盤：{stock['close_price']:.2f} 元")
+            save_to_sheets(service, stock_id, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
 
-    print("推播完成")
-
+        msg.append("※ 資料來源：FinMind（付費版）")
+        send_line_push("\n".join(msg))
+        print(f"{stock_id} 推播完成")
 
 if __name__ == "__main__":
     main()
