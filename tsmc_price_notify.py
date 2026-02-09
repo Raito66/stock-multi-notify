@@ -73,30 +73,38 @@ def send_line_push(message: str):
 
 
 def get_latest_minute_price(dl) -> Optional[Dict]:
-    """
-    使用 FinMind 官方推薦的 get_data 方式取得最新分鐘級成交價
-    這是目前最穩定的寫法，能取得盤中即時股價（或盤後最後成交價）
-    """
     try:
         today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
 
-        # 關鍵修正：使用 get_data + dataset="TaiwanStockMinute"
-        df = dl.get_data(
+        print(f"正在查詢分鐘資料：{today}，股票：{TSMC_STOCK_ID}")
+
+        # 先用 get_data 取得原始 response（不轉 DataFrame）
+        response = dl.get_data(
             dataset="TaiwanStockMinute",
             data_id=TSMC_STOCK_ID,
             start_date=today,
-            end_date=today
+            end_date=today,
+            raw=True  # 關鍵：加 raw=True 取得原始 dict 而非自動轉 DataFrame
         )
 
+        print("FinMind 原始回傳（raw response）：")
+        print(response)  # <--- 這行最重要！會印出完整 response
+
+        # 如果是 dict 且有 'data'，再轉 DataFrame
+        if isinstance(response, dict) and 'data' in response:
+            df = pd.DataFrame(response['data'])
+        else:
+            df = response  # 可能是空的 DataFrame 或其他格式
+
         if df.empty:
-            print("今日分鐘資料為空（可能尚未開盤、盤後未更新或 API 限制）")
+            print("分鐘資料為空（可能尚未開盤、盤後未更新或 API 限制）")
             return None
 
         df = df.sort_values('date')
         latest = df.iloc[-1]
 
         price = float(latest['close'])
-        time_str = latest['date']  # 格式如 2026-02-09 10:45:00
+        time_str = latest['date']
 
         print(f"取得分鐘資料成功 - 時間：{time_str}，最新成交價：{price:.2f}")
 
