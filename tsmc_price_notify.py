@@ -28,9 +28,19 @@ if not all([CHANNEL_ACCESS_TOKEN, USER_ID, GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHE
 
 # ======================== 參數設定 ========================
 
-STOCK_LIST = ["2330"]  # 可以放多支股票
+STOCK_LIST = ["2330","6770","3481","2337","2344","2409","2367"]  # 可以放多支股票
 HISTORY_DAYS = 365
 SHEET_NAME = "Sheet1"
+
+STOCK_NAME_MAP = {
+    "2330": "台積電",
+    "6770": "力積電",
+    "3481": "群創",
+    "2337": "旺宏",
+    "2344": "華邦電",
+    "2409": "友達",
+    "2367": "燿華"
+}
 
 # ==========================================================
 
@@ -174,18 +184,18 @@ def load_history_from_sheets(service) -> List[Dict]:
         write_log(error_msg)
         return []
 
-def save_to_sheets(service, stock_id, date, price, ma5, ma20, ma60, timestamp):
+def save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp):
     if not service:
         return False
     try:
-        values = [[stock_id, date, price, ma5, ma20, ma60, timestamp]]
+        values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
         service.spreadsheets().values().append(
             spreadsheetId=GOOGLE_SHEET_ID,
             range=f"{SHEET_NAME}!A2",
             valueInputOption="USER_ENTERED",
             body={"values": values}
         ).execute()
-        print(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
+        write_log(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
         return True
     except Exception as e:
         error_msg = f"{stock_id} 寫入 Sheets 失敗：{e}"
@@ -206,6 +216,7 @@ def main():
     dl.login_by_token(FINMIND_TOKEN)
 
     for stock_id in STOCK_LIST:
+        stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
         stock = get_stock_data(dl, stock_id)
         if not stock:
             write_log(f"{stock_id} 無法取得資料")
@@ -225,7 +236,7 @@ def main():
         pct = change / yesterday * 100 if yesterday else 0
 
         msg = [
-            f"【{stock_id} 價格監控】",
+            f"【{stock_id} {stock_name} 價格監控】",
             f"時間：{now_str}",
             "━━━━━━━━━━━━━━",
             f"現價：{latest:.2f} 元",
@@ -238,11 +249,12 @@ def main():
 
         if stock["is_after_close"] and "close_price" in stock:
             msg.append(f"今日收盤：{stock['close_price']:.2f} 元")
-            save_to_sheets(service, stock_id, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
+            save_to_sheets(service, stock_id, stock_name, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
 
-        msg.append("※ 資料來源：FinMind（付費版）")
+        msg.append("※ 資料來源：FinMind")
         send_line_push("\n".join(msg))
-        print(f"{stock_id} 推播完成")
+        write_log(f"{stock_id} LINE 推播內容：\n" + "\n".join(msg))
+        write_log(f"{stock_id} 推播完成")
 
 if __name__ == "__main__":
     main()
