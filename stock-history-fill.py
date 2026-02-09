@@ -103,6 +103,45 @@ def save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, 
 def calculate_ma(prices, window):
     return pd.Series(prices).rolling(window).mean().iloc[-1] if len(prices) >= window else None
 
+def safe_clear(service, spreadsheetId, range_):
+    while True:
+        try:
+            service.spreadsheets().values().clear(
+                spreadsheetId=spreadsheetId,
+                range=range_,
+                body={}
+            ).execute()
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if '429' in err_str or 'quota' in err_str.lower():
+                write_log(f"clear quota exceeded，sleep 60 秒後重試")
+                time.sleep(60)
+                continue
+            else:
+                write_log(f"clear 失敗：{e}")
+                return False
+
+def safe_update(service, spreadsheetId, range_, values):
+    while True:
+        try:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheetId,
+                range=range_,
+                valueInputOption="USER_ENTERED",
+                body={"values": values}
+            ).execute()
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if '429' in err_str or 'quota' in err_str.lower():
+                write_log(f"update quota exceeded，sleep 60 秒後重試")
+                time.sleep(60)
+                continue
+            else:
+                write_log(f"update 失敗：{e}")
+                return False
+
 def trim_history_to_limit(service, stock_id, limit=400):
     if not service:
         return
@@ -118,19 +157,12 @@ def trim_history_to_limit(service, stock_id, limit=400):
             dates_to_delete = [row[2] for row in stock_rows[:to_delete]]
             for date in dates_to_delete:
                 try:
-                    service.spreadsheets().values().clear(
-                        spreadsheetId=GOOGLE_SHEET_ID,
-                        range=f"{SHEET_NAME}!A2:H",
-                        body={}
-                    ).execute()
+                    # 用 safe_clear 包裝
+                    safe_clear(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2:H")
                     remaining_rows = [row for row in values if not (len(row) > 0 and row[0] == stock_id and row[2] == date)]
                     if remaining_rows:
-                        service.spreadsheets().values().update(
-                            spreadsheetId=GOOGLE_SHEET_ID,
-                            range=f"{SHEET_NAME}!A2",
-                            valueInputOption="USER_ENTERED",
-                            body={"values": remaining_rows}
-                        ).execute()
+                        # 用 safe_update 包裝
+                        safe_update(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2", remaining_rows)
                 except Exception as e:
                     write_log(f"{stock_id} 刪除舊資料失敗：{e}")
     except Exception as e:

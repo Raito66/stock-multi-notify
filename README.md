@@ -44,7 +44,7 @@ python stock-multi-notify.py
 python stock-history-fill.py
 ```
 - 程式會自動檢查每檔股票是否有 400 筆資料，缺漏會自動補齊。
-- 若遇到 Google Sheets API 配額限制（429 quota exceeded），會自動 sleep 60 秒並無限重試，直到寫入成功，**確保資料不會有缺漏**。
+- 所有 Google Sheets 操作（寫入、刪除、更新）遇到 API 配額限制（429 quota exceeded）時，會自動 sleep 60 秒並無限重試直到成功，**確保資料不會有缺漏且流程不中斷**。
 - **若資料已達 400 筆，則自動跳過該股票，不再補資料，排程可安全重複執行。**
 
 ## 推播內容範例
