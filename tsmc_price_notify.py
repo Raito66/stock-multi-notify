@@ -1,19 +1,18 @@
 # 台積電價格監控 - 使用 Google Sheets 永久儲存
-# 資料來源：FinMind
+# 資料來源：FinMind（付費版 Backer / Pro 已解鎖即時分鐘資料）
 # 支援盤中即時推播 + 盤後存收盤價 + 同時顯示最新成交與收盤價
-# 不依賴額外環境變數 RUN_MODE，只靠執行時間判斷
 
 import os
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
+import pandas as pd
 
 from FinMind.data import DataLoader
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import time
-import pandas as pd
 
 # ======================== 環境變數 ========================
 
@@ -75,13 +74,12 @@ def send_line_push(message: str):
 
 def get_latest_minute_price(dl) -> Optional[Dict]:
     """
-    取得台積電今日最新的分鐘級成交價（最接近即時）
-    使用 FinMind 官方 get_data 方式
+    取得台積電今日最新的分鐘級成交價（盤中即時，盤後為最後成交）
+    使用 FinMind 付費版支援的 TaiwanStockMinute 資料集
     """
     try:
         today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-
-        print(f"正在查詢分鐘資料：日期={today}，股票={TSMC_STOCK_ID}")
+        print(f"正在查詢分鐘資料 → 日期：{today}，股票：{TSMC_STOCK_ID}")
 
         df = dl.get_data(
             dataset="TaiwanStockMinute",
@@ -93,12 +91,14 @@ def get_latest_minute_price(dl) -> Optional[Dict]:
         print(f"取得資料筆數：{len(df) if not df.empty else 0}")
 
         if df.empty:
-            print("分鐘資料為空（可能尚未開盤、盤後未更新、或 API 限制）")
+            print("分鐘資料為空（可能尚未開盤、盤後未更新、或資料延遲）")
             return None
 
-        # 確保欄位存在
-        if 'date' not in df.columns or 'close' not in df.columns:
-            print("資料欄位異常，缺少 'date' 或 'close'")
+        # 檢查必要欄位
+        required_cols = ['date', 'close']
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            print(f"資料欄位異常，缺少：{missing}")
             print("實際欄位：", list(df.columns))
             return None
 
@@ -108,7 +108,7 @@ def get_latest_minute_price(dl) -> Optional[Dict]:
         price = float(latest['close'])
         time_str = latest['date']
 
-        print(f"取得分鐘資料成功 - 時間：{time_str}，最新成交價：{price:.2f}")
+        print(f"成功取得最新分鐘資料 - 時間：{time_str}，成交價：{price:.2f}")
 
         return {
             "price": price,
@@ -117,14 +117,12 @@ def get_latest_minute_price(dl) -> Optional[Dict]:
 
     except Exception as e:
         print(f"取得分鐘價失敗：{str(e)}")
-        # 如果是 KeyError 'data'，表示回傳結構異常
-        if 'response' in locals():
-            print("原始回應內容（如果有）：", response)
+        print("錯誤類型：", type(e).__name__)
         return None
 
 
 def get_today_close(dl, date_str: str) -> Optional[float]:
-    """取得指定日期的收盤價（來自日資料）"""
+    """盤後取得今日收盤價（用於存檔）"""
     try:
         df = dl.taiwan_stock_daily(
             stock_id=TSMC_STOCK_ID,
@@ -132,7 +130,10 @@ def get_today_close(dl, date_str: str) -> Optional[float]:
             end_date=date_str
         )
         if not df.empty:
-            return float(df.iloc[0]['close'])
+            close_price = float(df.iloc[0]['close'])
+            print(f"取得今日收盤價：{close_price:.2f}")
+            return close_price
+        print("今日日K資料為空")
         return None
     except Exception as e:
         print(f"取得今日收盤價失敗：{e}")
@@ -152,7 +153,10 @@ def get_yesterday_close(dl) -> Optional[float]:
         )
         if not df.empty:
             df = df.sort_values('date')
-            return float(df.iloc[-1]['close'])
+            close_price = float(df.iloc[-1]['close'])
+            print(f"前日收盤價：{close_price:.2f} ({df.iloc[-1]['date']})")
+            return close_price
+        print("無法取得前日收盤價")
         return None
     except Exception as e:
         print(f"取得昨收失敗：{e}")
@@ -163,8 +167,10 @@ def get_tsmc_data(dl) -> Optional[Dict]:
     taipei_now = datetime.now(timezone(timedelta(hours=8)))
     today_str = taipei_now.strftime("%Y-%m-%d")
 
+    # 盤中 / 盤後都先用分鐘資料取最新價
     minute_data = get_latest_minute_price(dl)
     if not minute_data:
+        print("無法取得分鐘資料，無法繼續")
         return None
 
     yesterday_close = get_yesterday_close(dl)
@@ -179,6 +185,7 @@ def get_tsmc_data(dl) -> Optional[Dict]:
         "is_after_close": taipei_now.hour > 13 or (taipei_now.hour == 13 and taipei_now.minute >= 30)
     }
 
+    # 盤後額外取正式收盤價（用於存檔）
     if result["is_after_close"]:
         today_close = get_today_close(dl, today_str)
         if today_close is not None:
@@ -271,9 +278,8 @@ def calculate_ma(history: List[Dict], days: int) -> Optional[float]:
     return sum(prices) / len(prices)
 
 
-# 技術分析相關函式（這裡只保留框架，請補上你原本的完整內容）
 def get_smart_suggestion(price: float, history: List[Dict], ma5, ma20, ma60) -> List[str]:
-    suggestions = ["技術分析功能保留中..."]  # ← 請貼上你原本的完整建議邏輯
+    suggestions = ["技術分析功能保留中..."]  # 請貼上你原本的完整建議邏輯
     return suggestions
 
 
@@ -286,6 +292,7 @@ def main():
     today = now_dt.strftime("%Y-%m-%d")
 
     print(f"🕐 台灣時間：{now_str}")
+    print(f"FinMind 版本：{DataLoader.__module__.split('.')[0]}")  # 顯示版本確認
 
     service = get_sheets_service()
     if not service:
@@ -295,7 +302,7 @@ def main():
     dl = DataLoader()
     try:
         dl.login_by_token(api_token=FINMIND_TOKEN)
-        print("FinMind 登入成功")
+        print("FinMind 登入成功（付費版已啟用）")
     except Exception as e:
         print(f"FinMind 登入失敗：{e}")
         send_line_push(f"【台積電監控】\nFinMind 登入失敗：{str(e)}")
@@ -303,7 +310,7 @@ def main():
 
     stock_data = get_tsmc_data(dl)
     if stock_data is None:
-        send_line_push(f"【台積電監控】\n{now_str}\n⚠️ 無法取得股價資料（可能市場未開盤或 API 限制）")
+        send_line_push(f"【台積電監控】\n{now_str}\n⚠️ 無法取得股價資料（可能市場未開盤或資料延遲）")
         return
 
     latest_price = stock_data["latest_price"]
@@ -316,13 +323,12 @@ def main():
 
     is_after_close = stock_data["is_after_close"]
     saved = False
-    ma_price = latest_price   # 預設用最新價計算當前狀態
+    ma_price = latest_price
 
-    # 只有在盤後 且 今天還沒存過 才寫入收盤價
     if is_after_close and last_date != today:
         close_price = stock_data.get("close_price")
         if close_price is not None:
-            ma_price = close_price  # 用收盤價計算均線與建議
+            ma_price = close_price
             history.append({'date': today, 'price': close_price, 'timestamp': now_str})
             ma5 = calculate_ma(history, 5)
             ma20 = calculate_ma(history, 20)
@@ -376,7 +382,7 @@ def main():
 
     msg_parts.append("━━━━━━━━━━━━━━")
     msg_parts.append(f"歷史資料：{len(history)}/{HISTORY_DAYS} 天")
-    msg_parts.append("※ 資料來源：FinMind")
+    msg_parts.append("※ 資料來源：FinMind（付費版）")
 
     send_line_push("\n".join(msg_parts))
 
