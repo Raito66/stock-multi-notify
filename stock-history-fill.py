@@ -171,6 +171,7 @@ def trim_history_to_limit(service, stock_id, limit=400):
 def fill_missing_history(service, dl, batch_days=10, sleep_sec=60):
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
+    today_str = now.strftime("%Y-%m-%d")
     for stock_id in STOCK_LIST:
         stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
         history = load_history_from_sheets(service)
@@ -193,14 +194,28 @@ def fill_missing_history(service, dl, batch_days=10, sleep_sec=60):
             batch_end = min(batch_start + batch_days, total)
             for i in range(batch_start, batch_end):
                 date = dates[i]
-                if date not in existing_dates:
-                    ma5 = calculate_ma(closes[:i+1], 5)
-                    ma20 = calculate_ma(closes[:i+1], 20)
-                    ma60 = calculate_ma(closes[:i+1], 60)
-                    price = closes[i]
-                    timestamp = f"{date} 00:00:00"
-                    save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp)
-                    write_log(f"{stock_id} 補齊歷史收盤價：{date} - {price}")
+                # 若日期已存在且不是今天，則跳過
+                if date in existing_dates and date != today_str:
+                    continue
+                # 若是今天且已存在，先刪除該行再寫入（覆蓋）
+                if date == today_str and date in existing_dates:
+                    # 讀取所有資料，移除今天該股票的舊資料
+                    result = service.spreadsheets().values().get(
+                        spreadsheetId=GOOGLE_SHEET_ID,
+                        range=f"{SHEET_NAME}!A2:H"
+                    ).execute()
+                    values = result.get("values", [])
+                    new_values = [row for row in values if not (len(row) > 0 and row[0] == stock_id and row[2] == date)]
+                    safe_clear(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2:H")
+                    if new_values:
+                        safe_update(service, GOOGLE_SHEET_ID, f"{SHEET_NAME}!A2", new_values)
+                ma5 = calculate_ma(closes[:i+1], 5)
+                ma20 = calculate_ma(closes[:i+1], 20)
+                ma60 = calculate_ma(closes[:i+1], 60)
+                price = closes[i]
+                timestamp = f"{date} 00:00:00"
+                save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp)
+                write_log(f"{stock_id} 補齊歷史收盤價：{date} - {price}")
             write_log(f"{stock_id} batch {batch_start}-{batch_end} 補齊完成，sleep {sleep_sec} 秒")
             time.sleep(sleep_sec)
         trim_history_to_limit(service, stock_id, limit=400)
