@@ -251,6 +251,37 @@ def main():
         change = latest - yesterday
         pct = change / yesterday * 100 if yesterday else 0
 
+        # ===== 盤中推播建議（最白話版） =====
+        def get_intraday_advice(latest, ma5, ma20, ma60, pct):
+            if ma5 and ma20 and latest > ma5 and latest > ma20:
+                if abs(pct) < 1:
+                    return "建議現在可以全部買進"
+                elif 1 <= pct < 3:
+                    return "建議分批買進 30% 資金，剩下的等價格下跌再買"
+                elif pct >= 3:
+                    return "建議不要現在買，等價格下跌再買"
+                else:
+                    return "建議現在可以買進"
+            elif ma5 and ma20 and latest < ma5 and latest < ma20:
+                return "建議不要買，暫時不要動作"
+            elif abs(pct) > 5:
+                return "今天價格變化太大，建議不要買也不要賣"
+            elif ma5 and latest > ma5:
+                return "可以小量分批買進 10%~20% 資金"
+            else:
+                return "建議暫時不要動作，等明天再看"
+
+        # ===== 盤後行情摘要（最白話版）=====
+        def get_after_close_summary(latest, ma5, ma20, ma60, change):
+            if ma5 and latest > ma5 and ma20 and latest > ma20:
+                return "建議明天可以買進，今天收盤價比平均價高"
+            elif ma5 and latest < ma5 and ma20 and latest < ma20:
+                return "建議明天不要買，今天收盤價比平均價低"
+            elif abs(change) < 1:
+                return "今天沒什麼變化，明天再觀察"
+            else:
+                return "今天價格有變動，明天再看情況決定要不要買"
+
         # 只在 13:31~13:59 推播昨日收盤價
         if is_yesterday_push:
             msg = [
@@ -261,7 +292,8 @@ def main():
                 f"5日均線：{ma5:.2f}" if ma5 is not None else "5日均線：無資料",
                 f"20日均線：{ma20:.2f}" if ma20 is not None else "20日均線：無資料",
                 f"60日均線：{ma60:.2f}" if ma60 is not None else "60日均線：無資料",
-                "※ 資料來源：FinMind（付費版）"
+                f"建議：{get_intraday_advice(yesterday, ma5, ma20, ma60, 0)}",
+                "※ 資料來源：FinMind"
             ]
             send_line_push("\n".join(msg))
             write_log(f"{stock_id} LINE 推播內容：\n" + "\n".join(msg))
@@ -281,6 +313,7 @@ def main():
                 f"20日均線：{ma20:.2f}" if ma20 is not None else "20日均線：無資料",
                 f"60日均線：{ma60:.2f}" if ma60 is not None else "60日均線：無資料",
                 f"今日收盤：{stock['close_price']:.2f} 元",
+                f"行情摘要：{get_after_close_summary(latest, ma5, ma20, ma60, change)}",
                 "※ 資料來源：FinMind"
             ]
             save_to_sheets(service, stock_id, stock_name, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
