@@ -9,13 +9,11 @@ from FinMind.data import DataLoader
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-USER_ID = os.getenv("LINE_USER_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN")
 
-if not all([CHANNEL_ACCESS_TOKEN, USER_ID, GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
+if not all([GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
     raise RuntimeError("缺少必要的環境變數")
 
 STOCK_LIST = ["2330","6770","3481","2337","2344","2409","2367"]
@@ -81,19 +79,26 @@ def load_history_from_sheets(service):
 def save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp):
     if not service:
         return False
-    try:
-        values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
-        service.spreadsheets().values().append(
-            spreadsheetId=GOOGLE_SHEET_ID,
-            range=f"{SHEET_NAME}!A2",
-            valueInputOption="USER_ENTERED",
-            body={"values": values}
-        ).execute()
-        write_log(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
-        return True
-    except Exception as e:
-        write_log(f"{stock_id} 寫入 Sheets 失敗：{e}")
-        return False
+    while True:
+        try:
+            values = [[stock_id, stock_name, date, price, ma5, ma20, ma60, timestamp]]
+            resp = service.spreadsheets().values().append(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=f"{SHEET_NAME}!A2",
+                valueInputOption="USER_ENTERED",
+                body={"values": values}
+            ).execute()
+            write_log(f"{stock_id} 寫入 Sheets 成功：{date} - {price:.2f}")
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if '429' in err_str or 'quota' in err_str.lower():
+                write_log(f"{stock_id} quota exceeded，sleep 60 秒後重試")
+                time.sleep(60)
+                continue
+            else:
+                write_log(f"{stock_id} 寫入 Sheets 失敗：{e}")
+                return False
 
 def calculate_ma(prices, window):
     return pd.Series(prices).rolling(window).mean().iloc[-1] if len(prices) >= window else None
@@ -171,7 +176,8 @@ def main():
     service = get_sheets_service()
     dl = DataLoader()
     dl.login_by_token(FINMIND_TOKEN)
-    fill_missing_history(service, dl)
+    # 每分鐘最多寫入 60 次
+    fill_missing_history(service, dl, batch_days=60, sleep_sec=60)
 
 if __name__ == "__main__":
     main()
