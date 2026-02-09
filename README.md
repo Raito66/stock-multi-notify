@@ -38,6 +38,15 @@ DISCORD_WEBHOOK_URL=你的 Discord Webhook 連結
 python stock-multi-notify.py
 ```
 
+### 6. 補齊歷史資料
+如需補齊 Google Sheets 歷史收盤價與均線資料，請執行：
+```bash
+python stock-history-fill.py
+```
+- 程式會自動檢查每檔股票是否有 400 筆資料，缺漏會自動補齊。
+- 若遇到 Google Sheets API 配額限制（429 quota exceeded），會自動 sleep 60 秒並無限重試，直到寫入成功，**確保資料不會有缺漏**。
+- **若資料已達 400 筆，則自動跳過該股票，不再補資料，排程可安全重複執行。**
+
 ## 推播內容範例
 ```
 【2330 台積電 價格監控】
@@ -59,6 +68,7 @@ python stock-multi-notify.py
 - 推播時間與頻率依程式設定，若有異常請聯絡管理員。
 - 若需新增/移除股票，請修改 `STOCK_LIST`。
 - Service Account 權限不足會導致 Sheets 寫入失敗，請務必設定共用。
+- 補齊歷史資料時，若遇到 Google Sheets API 配額限制，程式會自動等待並重試，**不會遺漏任何資料**。
 
 ---
 

@@ -142,6 +142,11 @@ def fill_missing_history(service, dl, batch_days=10, sleep_sec=60):
     for stock_id in STOCK_LIST:
         stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
         history = load_history_from_sheets(service)
+        # 判斷現有資料筆數，若已達 400 筆則跳過
+        stock_rows = [row for row in history if (row.get("stock_id", stock_id) == stock_id) or (len(row) > 0 and row[0] == stock_id)]
+        if len(stock_rows) >= 400:
+            write_log(f"{stock_id} 已有 {len(stock_rows)} 筆資料，無需補齊，跳過")
+            continue
         existing_dates = set([row["date"] for row in history if row.get("stock_id", stock_id) == stock_id])
         start_date = (now - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
