@@ -233,7 +233,6 @@ def main():
             write_log(f"{stock_id} 無法取得資料")
             continue
 
-        # 取得歷史收盤價
         df = dl.taiwan_stock_daily(stock_id, start_date=(now - timedelta(days=61)).strftime("%Y-%m-%d"), end_date=now.strftime("%Y-%m-%d"))
         closes = df["close"].tolist() if not df.empty else []
 
@@ -245,6 +244,23 @@ def main():
         yesterday = stock["yesterday_close"]
         change = latest - yesterday
         pct = change / yesterday * 100 if yesterday else 0
+
+        # 判斷盤後剛開始時（13:30~14:00），先推播昨天收盤價
+        if stock["is_after_close"] and "close_price" not in stock:
+            msg = [
+                f"【{stock_id} {stock_name} 昨日收盤價】",
+                f"時間：{now_str}",
+                "━━━━━━━━━━━━━━",
+                f"昨收：{yesterday:.2f} 元",
+                f"5日均線：{ma5:.2f}" if ma5 is not None else "5日均線：無資料",
+                f"20日均線：{ma20:.2f}" if ma20 is not None else "20日均線：無資料",
+                f"60日均線：{ma60:.2f}" if ma60 is not None else "60日均線：無資料",
+                "※ 資料來源：FinMind（付費版）"
+            ]
+            send_line_push("\n".join(msg))
+            write_log(f"{stock_id} LINE 推播內容：\n" + "\n".join(msg))
+            write_log(f"{stock_id} 推播完成（昨日收盤價）")
+            continue
 
         msg = [
             f"【{stock_id} {stock_name} 價格監控】",
