@@ -18,13 +18,12 @@ from googleapiclient.discovery import build
 
 # ======================== 環境變數 ========================
 
-CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-USER_ID = os.getenv("LINE_USER_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-if not all([CHANNEL_ACCESS_TOKEN, USER_ID, GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
+if not all([GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
     raise RuntimeError("缺少必要的環境變數")
 
 # ======================== 參數設定 ========================
@@ -60,16 +59,19 @@ def get_sheets_service():
         print(f"⚠️ Google Sheets 連線失敗：{e}")
         return None
 
-def send_line_push(message: str):
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
-    }
+def send_discord_push(message: str):
+    if not DISCORD_WEBHOOK_URL:
+        write_log("未設定 DISCORD_WEBHOOK_URL，無法推播 Discord。")
+        return
+    data = {"content": message}
     try:
-        requests.post(url, headers=headers, json={"to": USER_ID, "messages":[{"type":"text","text":message}]}, timeout=10)
+        resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
+        if resp.status_code != 204:
+            write_log(f"Discord 推播失敗，狀態碼：{resp.status_code}，回應：{resp.text}")
+        else:
+            write_log("Discord 推播成功")
     except Exception as e:
-        print(f"LINE 推播失敗：{e}")
+        write_log(f"Discord 推播失敗：{e}")
 
 def write_log(msg):
     with open("error.log", "a", encoding="utf-8") as f:
@@ -295,8 +297,8 @@ def main():
                 f"建議：{get_intraday_advice(yesterday, ma5, ma20, ma60, 0)}",
                 "※ 資料來源：FinMind"
             ]
-            send_line_push("\n".join(msg))
-            write_log(f"{stock_id} LINE 推播內容：\n" + "\n".join(msg))
+            send_discord_push("\n".join(msg))
+            write_log(f"{stock_id} Discord 推播內容：\n" + "\n".join(msg))
             write_log(f"{stock_id} 推播完成（昨日收盤價）")
             continue
 
@@ -317,8 +319,8 @@ def main():
                 "※ 資料來源：FinMind"
             ]
             save_to_sheets(service, stock_id, stock_name, stock["date"], stock["close_price"], ma5, ma20, ma60, now_str)
-            send_line_push("\n".join(msg))
-            write_log(f"{stock_id} LINE 推播內容：\n" + "\n".join(msg))
+            send_discord_push("\n".join(msg))
+            write_log(f"{stock_id} Discord 推播內容：\n" + "\n".join(msg))
             write_log(f"{stock_id} 推播完成（今日收盤價）")
             continue
 
