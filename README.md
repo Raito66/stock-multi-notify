@@ -1,4 +1,4 @@
-# stock-multi-notify（TSMC股價/多股自動推播通知）
+# stock-multi-notify（多股自動推播通知）
 
 本專案自動監控多檔台股（如台積電、力積電、群創等），盤中與盤後將即時價格、均線、行情建議自動推播至 Discord，並同步儲存至 Google Sheets。資料來源為 FinMind。
 
