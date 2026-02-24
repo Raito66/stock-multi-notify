@@ -321,6 +321,7 @@ def main():
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
     now_str = now.strftime("%Y年%m月%d日 %H時%M分%S秒")
+    today_date = now.strftime("%Y-%m-%d")  # 用來判斷是否同一天
     hour = now.hour
     minute = now.minute
     today_str = now.strftime("%Y-%m-%d")
@@ -343,6 +344,35 @@ def main():
         return
 
     write_log("通過交易日檢查，開始處理股票資料...")
+
+    # ──────────────── 當天推播批次計數 ────────────────
+    count_file = "today_push_count.txt"
+    current_count = 1
+
+    try:
+        if os.path.exists(count_file):
+            with open(count_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                if len(lines) >= 2:
+                    file_date = lines[0].strip()
+                    file_count = int(lines[1].strip())
+                    if file_date == today_date:
+                        current_count = file_count + 1
+        # 更新檔案
+        with open(count_file, "w", encoding="utf-8") as f:
+            f.write(f"{today_date}\n{current_count}\n")
+    except Exception as e:
+        write_log(f"讀寫推播計數檔案失敗：{e}，本次視為第 1 次")
+
+    # ──────────────── 推播批次標題 ────────────────
+    batch_title = [
+        "════════════════════════════════════════════════════════════",
+        f"📢 今日第 {current_count} 次盤中更新　{now_str}",
+        "════════════════════════════════════════════════════════════",
+        ""
+    ]
+    send_discord_push("\n".join(batch_title))
+    time.sleep(2.5)  # 讓標題與第一支股票有明顯間隔
 
     # ==================== 原有推播時間判斷 ====================
     is_yesterday_push = (hour == 13 and 31 <= minute < 59)
@@ -414,6 +444,7 @@ def main():
             ]
             send_discord_push("\n".join(msg))
             write_log(f"{stock_id} 推播昨日收盤價完成")
+            time.sleep(1.5)
             continue
 
         if is_today_push and stock["is_after_close"]:
@@ -450,6 +481,7 @@ def main():
 
             send_discord_push("\n".join(msg))
             write_log(f"{stock_id} 推播盤後資訊完成")
+            time.sleep(1.5)
             continue
 
         # 盤中推播
@@ -470,6 +502,7 @@ def main():
 
         send_discord_push("\n".join(msg))
         write_log(f"{stock_id} 盤中推播完成")
+        time.sleep(1.5)  # 個股間隔，避免太密集
 
 
 if __name__ == "__main__":
