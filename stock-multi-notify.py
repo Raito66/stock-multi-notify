@@ -330,6 +330,10 @@ def main():
     write_log(f"🕐 台灣時間：{now_str}")
 
     service = get_sheets_service()
+    if not service:
+        write_log("無法連線 Google Sheets，結束執行")
+        return
+
     dl = DataLoader()
     try:
         dl.login_by_token(FINMIND_TOKEN)
@@ -346,44 +350,54 @@ def main():
 
     write_log("通過交易日檢查，開始處理股票資料...")
 
-    # ──────────────── 當天推播批次計數 ────────────────
-    count_file = "today_push_count.txt"
-    current_count = 1
+    # ──────────────── 使用 Google Sheets 記錄當天推播批次計數 ────────────────
+    count_range = f"{SHEET_NAME}!J1:K1"  # J1: 日期, K1: 計數
 
+    current_count = 1
     try:
-        if os.path.exists(count_file):
-            with open(count_file, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                if len(lines) >= 2:
-                    file_date = lines[0].strip()
-                    file_count = int(lines[1].strip())
-                    if file_date == today_date:
-                        current_count = file_count + 1
-        # 更新檔案
-        with open(count_file, "w", encoding="utf-8") as f:
-            f.write(f"{today_date}\n{current_count}\n")
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=count_range
+        ).execute()
+        values = result.get('values', [])
+        if values and len(values) > 0 and len(values[0]) >= 2:
+            sheet_date = str(values[0][0]).strip() if values[0][0] else ""
+            sheet_count_str = str(values[0][1]).strip() if len(values[0]) > 1 else ""
+            if sheet_date == today_date and sheet_count_str.isdigit():
+                current_count = int(sheet_count_str) + 1
+            else:
+                write_log(f"Sheets 日期不符或無效：{sheet_date}，本次從 1 開始")
     except Exception as e:
-        write_log(f"讀寫推播計數檔案失敗：{e}，本次視為第 1 次")
+        write_log(f"讀取 Sheets 計數失敗：{e}，本次視為第 1 次")
 
     # ──────────────── 推播批次標題 ────────────────
+    title_text = "盤中更新"
+    if hour >= 14:
+        title_text = "盤後更新"
+    elif hour == 13 and 31 <= minute < 59:
+        title_text = "昨日收盤更新"
+
     batch_title = [
         "════════════════════════════════════════════════════════════",
-        f"📢 今日第 {current_count} 次盤中更新　{now_str}",
+        f"📢 今日第 {current_count} 次 {title_text}　{now_str}",
         "════════════════════════════════════════════════════════════",
         ""
     ]
     send_discord_push("\n".join(batch_title))
-    time.sleep(2.5)  # 讓標題與第一支股票有明顯間隔
+    time.sleep(1.0)  # 縮短為 1 秒，避免卡太久
 
     # ==================== 原有推播時間判斷 ====================
     is_yesterday_push = (hour == 13 and 31 <= minute < 59)
     is_today_push = (hour >= 14)
+
+    success = True  # 用來判斷是否完整執行 7 支
 
     for stock_id in STOCK_LIST:
         stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
         stock = get_stock_data(dl, stock_id)
         if not stock:
             write_log(f"{stock_id} 無法取得資料，跳過")
+            success = False
             continue
 
         # 取得近 61 天收盤價計算均線
@@ -445,7 +459,7 @@ def main():
             ]
             send_discord_push("\n".join(msg))
             write_log(f"{stock_id} 推播昨日收盤價完成")
-            time.sleep(1.5)
+            time.sleep(1.0)
             continue
 
         if is_today_push and stock["is_after_close"]:
@@ -482,7 +496,7 @@ def main():
 
             send_discord_push("\n".join(msg))
             write_log(f"{stock_id} 推播盤後資訊完成")
-            time.sleep(1.5)
+            time.sleep(1.0)
             continue
 
         # 盤中推播
@@ -503,7 +517,23 @@ def main():
 
         send_discord_push("\n".join(msg))
         write_log(f"{stock_id} 盤中推播完成")
-        time.sleep(1.5)  # 個股間隔，避免太密集
+        time.sleep(1.0)  # 個股間隔，避免太密集
+
+    # ──────────────── 只有完整執行才更新計數到 Sheets ────────────────
+    if success:
+        try:
+            update_values = [[today_date, current_count]]
+            service.spreadsheets().values().update(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=count_range,
+                valueInputOption="USER_ENTERED",
+                body={"values": update_values}
+            ).execute()
+            write_log(f"本次推播完成，更新 Sheets 計數：{today_date} 第 {current_count} 次")
+        except Exception as e:
+            write_log(f"更新 Sheets 計數失敗：{e}")
+    else:
+        write_log("本次推播未完整執行 7 支股票，不更新計數")
 
 
 if __name__ == "__main__":
