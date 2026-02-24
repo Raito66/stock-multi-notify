@@ -10,6 +10,7 @@ import pandas as pd
 from FinMind.data import DataLoader
 import requests
 import yfinance as yf
+import time
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
