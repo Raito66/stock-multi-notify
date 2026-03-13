@@ -5,7 +5,7 @@ load_dotenv()
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 from FinMind.data import DataLoader
@@ -55,10 +55,10 @@ def get_sheets_service():
             scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
         service = build("sheets", "v4", credentials=credentials)
-        print("✅ Google Sheets 連線成功")
+        write_log("✅ Google Sheets 連線成功")
         return service
     except Exception as e:
-        print(f"⚠️ Google Sheets 連線失敗：{e}")
+        write_log(f"⚠️ Google Sheets 連線失敗：{e}")
         return None
 
 
@@ -344,7 +344,7 @@ def save_to_sheets(service, stock_id, stock_name, date, price, ma5, ma20, ma60, 
 
 
 # ======================== 盤中建議 ========================
-def get_intraday_advice(latest, ma5, ma20, ma60, pct):
+def get_intraday_advice(latest, ma5, ma20, pct):
     if not (ma5 and ma20):
         return "均線資料不夠，先等等看比較好"
 
@@ -387,7 +387,7 @@ def get_intraday_advice(latest, ma5, ma20, ma60, pct):
         return "現在情況不明，先觀望比較安全，等明天再說"
 
 
-def get_after_close_summary(latest, ma5, ma20, ma60, change):
+def get_after_close_summary(latest, ma5, ma20, change):
     if ma5 and latest > ma5 and ma20 and latest > ma20:
         return "建議明天可以買進，今天收盤價比平均價高"
     elif ma5 and latest < ma5 and ma20 and latest < ma20:
@@ -403,10 +403,9 @@ def main():
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
     now_str = now.strftime("%Y年%m月%d日 %H時%M分%S秒")
-    today_date = now.strftime("%Y-%m-%d")  # 用來判斷是否同一天
+    today_date = now.strftime("%Y-%m-%d")
     hour = now.hour
     minute = now.minute
-    today_str = now.strftime("%Y-%m-%d")
 
     write_log(f"🕐 台灣時間：{now_str}")
 
@@ -425,8 +424,8 @@ def main():
     # ==================== 交易日檢查 ====================
     is_after_close = hour > 13 or (hour == 13 and minute >= 30)
 
-    if not is_trading_day(dl, today_str, is_after_close):
-        write_log(f"今天 {today_str} 判斷為非交易日，結束本次執行")
+    if not is_trading_day(dl, today_date, is_after_close):
+        write_log(f"今天 {today_date} 判斷為非交易日，結束本次執行")
         return
 
     write_log("通過交易日檢查，開始處理股票資料...")
@@ -548,7 +547,7 @@ def main():
                 f"5日均線：{ma5_str}",
                 f"20日均線：{ma20_str}",
                 f"60日均線：{ma60_str}",
-                f"建議：{get_intraday_advice(yesterday_close, ma5, ma20, ma60, 0)}",
+                f"建議：{get_intraday_advice(yesterday_close, ma5, ma20, 0)}",
                 "※ 資料來源：FinMind"
             ]
             send_discord_push("\n".join(msg))
@@ -578,7 +577,7 @@ def main():
                 f"20日均線：{ma20_str}",
                 f"60日均線：{ma60_str}",
                 f"今日收盤：{close_price:.2f} 元{close_note}",
-                f"行情摘要：{get_after_close_summary(latest, ma5, ma20, ma60, change)}",
+                f"行情摘要：{get_after_close_summary(latest, ma5, ma20, change)}",
                 footnote
             ]
 
@@ -605,7 +604,7 @@ def main():
             f"5日均線：{ma5_str}",
             f"20日均線：{ma20_str}",
             f"60日均線：{ma60_str}",
-            f"建議：{get_intraday_advice(latest, ma5, ma20, ma60, pct)}",
+            f"建議：{get_intraday_advice(latest, ma5, ma20, pct)}",
             footnote
         ]
 
