@@ -200,14 +200,15 @@ def is_trading_day(dl: DataLoader, check_date: str, is_after_close: bool) -> boo
                 write_log(f"盤後檢查：{check_date} 無日K資料，視為非交易日")
                 return False
         else:
-            # 盤中：檢查昨天是否有資料
+            # 盤中：查最近 7 天內是否有交易資料（避免週一查到週日誤判休市）
+            start = (datetime.strptime(check_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
             yesterday = (datetime.strptime(check_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-            df = dl.taiwan_stock_daily(symbol_for_check, start_date=yesterday, end_date=yesterday)
+            df = dl.taiwan_stock_daily(symbol_for_check, start_date=start, end_date=yesterday)
             if not df.empty:
-                write_log(f"盤中檢查：{yesterday} 有交易資料，今天很可能為交易日")
+                write_log(f"盤中檢查：最近 7 天內有交易資料，今天很可能為交易日")
                 return True
             else:
-                write_log(f"盤中檢查：{yesterday} 無交易資料，今天很可能休市")
+                write_log(f"盤中檢查：最近 7 天內無交易資料，今天很可能休市")
                 return False
     except Exception as e:
         write_log(f"交易日檢查 FinMind 失敗：{e}，改用 yfinance 確認")
@@ -282,6 +283,20 @@ def get_today_close(dl, stock_id: str, date_str: str) -> Optional[float]:
         return None
 
 
+def get_prev_close(dl, stock_id: str, before_date: str) -> Optional[float]:
+    """取得 before_date 之前最近一個交易日的收盤價（最多往回找 7 天，解決週一查到週日的問題）"""
+    try:
+        start = (datetime.strptime(before_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+        yesterday = (datetime.strptime(before_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        df = dl.taiwan_stock_daily(stock_id, start_date=start, end_date=yesterday)
+        if not df.empty:
+            return float(df.iloc[-1]["close"])
+        return None
+    except Exception as e:
+        write_log(f"{stock_id} 取得前一交易日收盤價失敗：{e}")
+        return None
+
+
 def get_stock_data(dl, stock_id: str) -> Optional[Dict]:
     now = datetime.now(timezone(timedelta(hours=8)))
     today = now.strftime("%Y-%m-%d")
@@ -291,7 +306,7 @@ def get_stock_data(dl, stock_id: str) -> Optional[Dict]:
     if not instant:
         return None
 
-    yesterday_close = get_today_close(dl, stock_id, (now - timedelta(days=1)).strftime("%Y-%m-%d"))
+    yesterday_close = get_prev_close(dl, stock_id, today)
     if yesterday_close is None:
         yesterday_close = instant["price"]
 
