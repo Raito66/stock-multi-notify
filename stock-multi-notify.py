@@ -92,6 +92,10 @@ def load_stock_list_from_sheets(service):
                 write_log(f"⚠️ 代號格式錯誤，跳過：{stock_id}")
                 continue
 
+            if stock_id in stock_name_map:
+                write_log(f"⚠️ 代號重複，跳過：{stock_id}")
+                continue
+
             stock_list.append(stock_id)
             stock_name_map[stock_id] = stock_name
 
@@ -101,6 +105,10 @@ def load_stock_list_from_sheets(service):
                 f"錯誤代號：{', '.join(invalid)}\n"
                 f"格式說明：4～6 碼數字，可接一個英文字母（例：2330、00642U）"
             )
+
+        if not stock_list:
+            send_discord_push("⚠️ **Config 分頁所有代號均無效，改用程式內建預設清單**")
+            return None, None
 
         write_log(f"從 Config 分頁載入 {len(stock_list)} 支股票：{stock_list}")
         return stock_list, stock_name_map
@@ -480,12 +488,16 @@ def main():
             continue
 
         # 取得近 61 天收盤價計算均線
-        df = dl.taiwan_stock_daily(
-            stock_id,
-            start_date=(now - timedelta(days=61)).strftime("%Y-%m-%d"),
-            end_date=now.strftime("%Y-%m-%d")
-        )
-        closes = df["close"].tolist() if not df.empty else []
+        try:
+            df = dl.taiwan_stock_daily(
+                stock_id,
+                start_date=(now - timedelta(days=61)).strftime("%Y-%m-%d"),
+                end_date=now.strftime("%Y-%m-%d")
+            )
+            closes = df["close"].tolist() if not df.empty else []
+        except Exception as e:
+            write_log(f"{stock_id} 取得均線歷史資料失敗：{e}，均線以無資料顯示")
+            closes = []
 
         ma5 = calculate_ma(closes, 5)
         ma20 = calculate_ma(closes, 20)
