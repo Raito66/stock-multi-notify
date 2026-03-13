@@ -37,7 +37,7 @@ CONFIG_SHEET_NAME = "Config"
 
 # 關鍵參數：Render 512MiB 安全設定
 BATCH_DAYS = 90           # 90天≈63交易日，足以計算MA60
-SLEEP_BETWEEN_STOCKS = 120  # 每支股票處理完休息 120 秒
+SLEEP_BETWEEN_STOCKS = 60   # 每支股票處理完休息 60 秒
 SLEEP_BETWEEN_WRITES = 8    # 每寫 8 筆休息一次（防 Google API 限流）
 
 # ======================== 工具函式 ========================
@@ -252,7 +252,6 @@ def fill_missing_history(service, dl, stock_list, stock_name_map):
                     exist.get("price") not in (None, '', 'None'),
                     exist.get("ma5")  not in (None, '', '無資料'),
                     exist.get("ma20") not in (None, '', '無資料'),
-                    exist.get("ma60") not in (None, '', '無資料')
                 ]):
                     need_update = False
 

@@ -27,7 +27,6 @@ if not all([GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
 
 # ======================== 參數設定 ========================
 STOCK_LIST = ["2330", "6770", "3481", "2337", "2344", "2409", "2367", "3374", "3324", "00642U", "0050", "2231"]
-HISTORY_DAYS = 365
 SHEET_NAME = "Sheet1"
 CONFIG_SHEET_NAME = "Config"  # Google Sheets 股票清單分頁名稱
 
@@ -350,7 +349,6 @@ def get_intraday_advice(latest, ma5, ma20, ma60, pct):
         return "均線資料不夠，先等等看比較好"
 
     diff_ma5 = (latest - ma5) / ma5 * 100 if ma5 else 0
-    diff_ma20 = (latest - ma20) / ma20 * 100 if ma20 else 0
 
     if latest > ma5 and latest > ma20:
         if diff_ma5 <= 2.8 and 3.0 <= pct <= 6.0:
