@@ -70,7 +70,7 @@ def load_stock_list_from_sheets(service):
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
-            range=f"{CONFIG_SHEET_NAME}!A2:B"
+            range=f"{CONFIG_SHEET_NAME}!A2:C"
         ).execute()
         rows = result.get("values", [])
         if not rows:
@@ -86,6 +86,11 @@ def load_stock_list_from_sheets(service):
                 continue
             stock_id = str(row[0]).strip().upper()
             stock_name = str(row[1]).strip() if len(row) > 1 and row[1] else stock_id
+            enabled = str(row[2]).strip().upper() if len(row) > 2 and row[2] else "Y"
+
+            if enabled != "Y":
+                write_log(f"{stock_id} 啟用欄為 {enabled}，跳過")
+                continue
 
             if not re.match(r'^[0-9]{4,6}[A-Z]?$', stock_id):
                 invalid.append(stock_id)
