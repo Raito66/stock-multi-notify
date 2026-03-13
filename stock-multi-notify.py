@@ -25,7 +25,7 @@ if not all([GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID, FINMIND_TOKEN]):
     raise RuntimeError("缺少必要的環境變數")
 
 # ======================== 參數設定 ========================
-STOCK_LIST = ["2330", "6770", "3481", "2337", "2344", "2409", "2367", "3374", "3324", "00624U", "0050", "2231"]
+STOCK_LIST = ["2330", "6770", "3481", "2337", "2344", "2409", "2367", "3374", "3324", "00642U", "0050", "2231"]
 HISTORY_DAYS = 365
 SHEET_NAME = "Sheet1"
 
@@ -39,7 +39,7 @@ STOCK_NAME_MAP = {
     "2367": "燿華",
     "3374": "精材",
     "3324": "雙鴻",
-    "00624U": "期元大S&P石油",
+    "00642U": "期元大S&P石油",
     "0050": "元大台灣50",
     "2231": "為升"
 }
@@ -130,7 +130,8 @@ def is_trading_day(dl: DataLoader, check_date: str, is_after_close: bool) -> boo
 def get_latest_available_price(dl, stock_id: str):
     tz = timezone(timedelta(hours=8))
     today = datetime.now(tz).strftime("%Y-%m-%d")
-    tw_symbol = f"{stock_id}.TW"
+    TWO_STOCKS = {"3374", "3324"}
+    tw_symbol = f"{stock_id}.{'TWO' if stock_id in TWO_STOCKS else 'TW'}"
 
     try:
         df = dl.get_data(dataset="TaiwanStockPrice", data_id=stock_id, start_date=today)
@@ -553,7 +554,7 @@ def main():
         except Exception as e:
             write_log(f"更新 Sheets 計數失敗：{e}")
     else:
-        write_log("本次推播未完整執行 7 支股票，不更新計數")
+        write_log(f"本次推播未完整執行 {len(STOCK_LIST)} 支股票，不更新計數")
 
 
 if __name__ == "__main__":
