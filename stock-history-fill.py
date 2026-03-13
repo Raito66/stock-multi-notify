@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -32,6 +33,7 @@ STOCK_NAME_MAP = {
 }
 
 SHEET_NAME = "Sheet1"
+CONFIG_SHEET_NAME = "Config"
 
 # 關鍵參數：Render 512MiB 安全設定
 BATCH_DAYS = 20           # 每次只處理最近 20 天（記憶體最安全）
@@ -59,6 +61,48 @@ def get_sheets_service():
     except Exception as e:
         write_log(f"⚠️ Google Sheets 連線失敗：{e}")
         return None
+
+def load_stock_list_from_sheets(service):
+    """從 Config 分頁讀取股票清單（C欄=Y 才納入），失敗時回傳 None 使用預設清單。"""
+    if not service:
+        return None, None
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=f"{CONFIG_SHEET_NAME}!A2:C"
+        ).execute()
+        rows = result.get("values", [])
+        if not rows:
+            write_log("Config 分頁無資料，使用預設清單")
+            return None, None
+
+        stock_list = []
+        stock_name_map = {}
+
+        for row in rows:
+            if not row or not str(row[0]).strip():
+                continue
+            stock_id = str(row[0]).strip().upper()
+            stock_name = str(row[1]).strip() if len(row) > 1 and row[1] else stock_id
+            enabled = str(row[2]).strip().upper() if len(row) > 2 and row[2] else "Y"
+
+            if enabled != "Y":
+                continue
+            if not re.match(r'^[0-9]{4,6}[A-Z]?$', stock_id):
+                write_log(f"⚠️ 代號格式錯誤，跳過：{stock_id}")
+                continue
+            if stock_id in stock_name_map:
+                continue
+
+            stock_list.append(stock_id)
+            stock_name_map[stock_id] = stock_name
+
+        write_log(f"從 Config 分頁載入 {len(stock_list)} 支股票：{stock_list}")
+        return stock_list, stock_name_map
+    except Exception as e:
+        write_log(f"讀取 Config 分頁失敗：{e}，使用預設清單")
+        return None, None
+
 
 def load_history_from_sheets(service, stock_id=None):
     if not service:
@@ -160,13 +204,13 @@ def trim_history_to_limit(service, stock_id, limit=500):
         write_log(f"{stock_id} 清理歷史資料失敗：{e}")
 
 # ======================== 主補齊函式 ========================
-def fill_missing_history(service, dl):
+def fill_missing_history(service, dl, stock_list, stock_name_map):
     tz = timezone(timedelta(hours=8))
     now = datetime.now(tz)
     end_date = now.strftime("%Y-%m-%d")
 
-    for stock_id in STOCK_LIST:
-        stock_name = STOCK_NAME_MAP.get(stock_id, stock_id)
+    for stock_id in stock_list:
+        stock_name = stock_name_map.get(stock_id, stock_id)
         write_log(f"開始處理 {stock_id} ({stock_name})")
 
         # 讀取目前歷史（只用來比對）
@@ -242,7 +286,11 @@ def main():
     dl = DataLoader()
     dl.login_by_token(FINMIND_TOKEN)
 
-    fill_missing_history(service, dl)
+    sheets_stock_list, sheets_stock_name_map = load_stock_list_from_sheets(service)
+    active_stock_list = sheets_stock_list if sheets_stock_list else STOCK_LIST
+    active_stock_name_map = sheets_stock_name_map if sheets_stock_name_map else STOCK_NAME_MAP
+
+    fill_missing_history(service, dl, active_stock_list, active_stock_name_map)
 
     write_log("=== 補齊流程結束 ===")
 
