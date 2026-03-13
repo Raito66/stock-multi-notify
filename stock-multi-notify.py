@@ -492,11 +492,11 @@ def main():
             )
             continue
 
-        # 取得近 61 天收盤價計算均線
+        # 取得近 90 天收盤價計算均線（90天≈63交易日，足以計算MA60）
         try:
             df = dl.taiwan_stock_daily(
                 stock_id,
-                start_date=(now - timedelta(days=61)).strftime("%Y-%m-%d"),
+                start_date=(now - timedelta(days=90)).strftime("%Y-%m-%d"),
                 end_date=now.strftime("%Y-%m-%d")
             )
             closes = df["close"].tolist() if not df.empty else []
